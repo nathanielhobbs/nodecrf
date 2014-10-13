@@ -1,0 +1,10 @@
+#!/bin/bash
+for i in `seq 0 450`;
+do
+	if [ -f samples/annotated/sample_$i.data ];
+		then
+			cat samples/annotated/sample_$i.data >> masterTrain.data
+		else
+			echo "File samples/annotated/sample_$i.data does not exist"
+		fi
+done

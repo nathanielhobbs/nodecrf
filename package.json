@@ -1,0 +1,25 @@
+{
+  "name": "nodecrf",
+  "version": "0.0.1",
+  "description": "node implementaion of CRF (Conditional Random Field).",
+  "scripts": {
+    "test": "./node_modules/nodeunit/bin/nodeunit tests/test*"
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "nodeunit": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nathanielhobbs/nodecrf.git"
+  },
+  "keywords": [
+    "crf"
+  ],
+  "author": "Nathaniel Hobbs <hobbs.nathaniel@gmail.com>",
+  "bugs": {
+    "url": "https://github.com/nathanielhobbs/nodecrf/issues"
+  },
+  "homepage": "https://github.com/nathanielhobbs/nodecrf"
+}

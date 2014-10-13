@@ -1,0 +1,11 @@
+#!/bin/bash
+for i in `seq 0 496`;
+do
+	if [ -f samples/preannotated/sample_$i.json ];
+		then
+			node sampleToAnnotatedSample.js samples/preannotated/sample_$i.json > samples/annotated/sample_$i.data
+		else
+			echo "File samples/preannotated/sample_$i.json does not exist"
+		fi
+    
+done
