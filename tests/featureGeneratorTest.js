@@ -1,6 +1,10 @@
 var featureGenerator = require('../featureGenerator.js');
 
-// featureGenerator.generateFeatures('testTraining.data', 'invalidTemplate1');
+// featureGenerator.generateFeatures('testTraining.data', 'invalidTemplate1', function(error, result){
+// 	if(error)
+// 		console.log(error);
+// 	console.log(result)
+// });
 
 exports.testInvocations = function (test){
 	// test.throws(function () { featureGenerator.generateFeatures(); }
@@ -18,10 +22,17 @@ exports.testInvocations = function (test){
 	// test.throws(function () { featureGenerator.generateFeatures(null, null); }
 	// 	, 'Both training file and template file are required to be non-null');
 
-	test.throws(function () { featureGenerator.generateFeatures('testTraining.data', 'invalidTemplate1', test.done()); } //TODO: Add Callback
-		, 'No valid feature macros defined');
+	test.deepEqual(function () { featureGenerator.generateFeatures('testTraining.data', 'invalidTemplate1', function(error, result){
+		console.log('in callback')
+									if(error) {
+										console.log(error);
+									}
+									console.log('calling done')
+									test.done();
+								})
+							} 
+		, '[Error: No valid feature macros defined]');
 
 	// test.doesNotThrow(function () { featureGenerator.generateFeatures('testTraining.data', 'testTemplate'); }
 	// 	, 'Both a training file and a template file are required.');
-	
 };

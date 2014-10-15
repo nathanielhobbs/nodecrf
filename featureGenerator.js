@@ -6,7 +6,7 @@ var trainingFile, templateFile;
 var templateArray = []; // will be defined in setTemplateArray
 var featureCount = 0;
 
-if(process.argv[1] === 'node' && process.argv.length>2 && process.argv.length<4){
+if(process.argv[1] === 'node' && process.argv.length !== 4){
 	console.log("Invalid input.  Please specify a both a test file and template file name, e.g. node featureGenerator.js test.data template")
 	throw error;
 }
@@ -20,7 +20,9 @@ if(process.argv.length === 4){
 	trainingFile = process.argv[2];
 	templateFile = process.argv[3];
 
-	createFeatures(trainingFile, templateFile);
+	createFeatures(trainingFile, templateFile, function(err, result){
+		if (err) throw err;
+	});
 }
 
 module.exports.generateFeatures = createFeatures;
@@ -32,66 +34,157 @@ function createFeatures (trainingFile, templateFile, callback) {
 
 	featureCount = 0;
 	//open training file
-	fs.readFile(trainingFile, 'utf8', function(err, trainingData) {
-		if(err) throw err;
+	fs.readFile(trainingFile, 'utf8', function(error, trainingData) {
+		if(error){
+			callback(error);
+		}
 
-		var trainingDataArray = trainingData.split('\n');
+		var dataMatrix = trainingData.split('\n');
 
 		// get list of all labels that are in training data
-		var labelList = getLabelList(trainingDataArray);				
+		var labelList = getLabelList(dataMatrix);				
 
 		// open template file
-		fs.readFile(templateFile, 'utf8', function (err, templateData) {
-			if(err) {
-				throw err;
+		fs.readFile(templateFile, 'utf8', function (error, templateData) {
+			if(error) {
+				callback(error);
 			}
 
 			// First look at template file to see which features we care about in the training file
 			var templateDataArray = templateData.split('\n'); 
-			var templateArray = buildTemplateArray(templateDataArray);
+			buildTemplateArray(templateDataArray, function(error, result){
+				if(error)
+					callback(error)
+				templateArray = result;
+			});
 
 			// Look at training file and generate expanded features according to template macros
-			var expandedFeaturesObject = buildFeatures(templateArray, trainingDataArray, labelList);
-			
-			// console.log(expandedFeaturesObject)
+			var expandedFeaturesObject = buildFeatures(templateArray, dataMatrix, labelList);
 
-			fs.writeFile('features.txt', JSON.stringify(expandedFeaturesObject), 'utf8', callback)
-			console.log('Number of Features Generated: ' + featureCount)
-			console.timeEnd('Generate Features')
+			var featureIndicatorFunctions = buildFeatureIndicatorFunctions(expandedFeaturesObject);
+			
+			printSummary()
+
+			callback(null,featureIndicatorFunctions);
+			// console.log(expandedFeaturesObject['38'][0]+":"+decodeMacroChain(expandedFeaturesObject['38'][0], dataMatrix, 4))
+
+			// fs.writeFile('features.txt', JSON.stringify(expandedFeaturesObject), 'utf8', printSummary(callback))
 		});
 	});
 }
 
-function buildFeatures(templateArray, trainingDataArray, labelList){
+function buildFeatureIndicatorFunctions(expandedFeaturesObject) {
+	var featuresWithIndicatorFunction = {};
+
+	featuresWithIndicatorFunction.decodeMacroChain = function (featureMacro, dataMatrix, index){
+		var macroList = featureMacro.match(/%x\[[-]?\d+,\d+\]/g);
+		var featurePrefix = featureMacro.substring(0,featureMacro.indexOf(':')+1);
+		var decodedMacroSequence = '';
+
+		for(var j=0; j<macroList.length;j++){
+			var columnStartIndex = macroList[j].indexOf(',')+1;
+			var columnEndIndex = macroList[j].indexOf(']');
+			var rowStartIndex = macroList[j].indexOf('[')+1;
+			var rowEndIndex = macroList[j].indexOf(',');
+			var currentMacroColumn = parseInt(macroList[j].substring(columnStartIndex, columnEndIndex), 10);
+			var currentMacroRow = parseInt(macroList[j].substring(rowStartIndex, rowEndIndex), 10);
+			var decodedMacroValue = '';
+
+			// check for boundry conditions for macro (i.e. for first word in training doc with template entry %x[-1,0])
+			if(index + currentMacroRow < 0){
+				decodedMacroValue = '_B'+(index + currentMacroRow); // will result in value of the form e.g. _B-1 (where _B-1 is the token before the start of a sample)
+			}
+			// check for boundry condition when currentMacroRow is looking past last word in document
+			else if(index + currentMacroRow >= dataMatrix.length){
+				decodedMacroValue = '_B+'+(index + currentMacroRow - dataMatrix.length + 1); // will result in value of the form e.g. _B+1 (where _B+1 is the token after the end of a sample)
+			}
+			//else the standard case
+			else{ 
+				var trainingEntryArray = dataMatrix[index+currentMacroRow].split(/\s/);
+				decodedMacroValue = trainingEntryArray[currentMacroColumn];
+			}
+
+			if(j === 0){
+				decodedMacroSequence = featurePrefix + decodedMacroValue;
+			}
+			else{
+				decodedMacroSequence += '/' + decodedMacroValue;
+			}
+		}
+		return decodedMacroSequence;
+	}
+
+	for(var featureNumber in expandedFeaturesObject){
+		// expandecFeaturesObject[key] has format [unformmatedMacro, decodedMacro, previousLabel, currentLabel]
+		var macro = expandedFeaturesObject[featureNumber][0];
+		var featureDecodedMacro = expandedFeaturesObject[featureNumber][1];
+		var featurePreviousLabel = expandedFeaturesObject[featureNumber][2];
+		var featureCurrentLabel = expandedFeaturesObject[featureNumber][3];
+
+		featuresWithIndicatorFunction[featureNumber] = function (previousLabel, currentLabel, dataMatrix, index){
+			var decodedMacro = featuresWithIndicatorFunction.decodeMacroChain(macro, dataMatrix, index);
+			if(featurePreviousLabel === "n/a"){
+				if(currentLabel === featureCurrentLabel && decodedMacro === featureDecodedMacro)
+					return 1;
+			}
+			else if(previousLabel === featurePreviousLabel && 
+					currentLabel === featureCurrentLabel && 
+					decodedMacro === featureDecodedMacro)
+				return 1;
+			else
+				return 0;
+		};
+	}
+
+	return featuresWithIndicatorFunction;
+
+	// for(var feature in featuresWithIndicatorFunction){
+	// 	console.log(featuresWithIndicatorFunction[feature].toString())
+	// }
+
+	
+}
+
+function buildFeatures(templateArray, dataMatrix, labelList){
 	var expandedFeatures = {};
+	var testFeatureFunc = {};
 	for(var i=0; i<templateArray.length; i++){
-		var macroList = templateArray[i].match(/%x\[[-]?\d+,\d+\]/g);
-		var featurePrefix = templateArray[i].substring(0,templateArray[i].indexOf(':')+1);
 		var unlabeledFeatures = [];
-		var expandedMacroFeatures = [];
+		var labeledMacroFeatures = [];
+		var currentFeatureMacro = templateArray[i];
 
 		var step = 0;
 
 		if(templateArray[i] !== 'B')
-			unlabeledFeatures = buildFeaturesFromMacros(macroList, trainingDataArray, featurePrefix);
+			unlabeledFeatures = buildFeaturesFromMacros(currentFeatureMacro, dataMatrix);
 		else
 			unlabeledFeatures.push('B') // this is a special feature template that only features for y_i-1 and y_i label combinations, there is no macro
 
 		// console.log("unlabeled Features:")
 		// console.log(unlabeledFeatures)
-		expandedMacroFeatures = labelFeatures(unlabeledFeatures, labelList);
-		// console.log(expandedMacroFeatures)
+		labeledMacroFeatures = labelFeatures(unlabeledFeatures, labelList);
+		// console.log(labeledMacroFeatures)
 
-		for (var feature in expandedMacroFeatures) { 
+
+		for (var feature in labeledMacroFeatures) { 
+			var featurePreviousLabel = feature.substring(feature.lastIndexOf(':')+1, feature.lastIndexOf(',')).trim();
+			var featureCurrentLabel = feature.substring(feature.lastIndexOf(',')+1, feature.length).trim();
+			var currentMacro = templateArray[i];
+			var decodedMacro = feature.substring(0, feature.lastIndexOf(':'));
+			var featureInfo = [currentMacro, decodedMacro, featurePreviousLabel, featureCurrentLabel];
+
+			expandedFeatures[featureCount] = featureInfo;
 			featureCount++;
-			expandedFeatures[feature] = expandedMacroFeatures[feature]; 
 		}
 	}
 	return expandedFeatures;
 }
 
-function buildFeaturesFromMacros(macroList, trainingDataArray, featurePrefix){
-	var unlabeledFeatures = [];
+function decodeMacroChain(featureMacro, dataMatrix, index){
+	var macroList = featureMacro.match(/%x\[[-]?\d+,\d+\]/g);
+	var featurePrefix = featureMacro.substring(0,featureMacro.indexOf(':')+1);
+	var decodedMacroSequence = '';
+
 	for(var j=0; j<macroList.length;j++){
 		var columnStartIndex = macroList[j].indexOf(',')+1;
 		var columnEndIndex = macroList[j].indexOf(']');
@@ -99,16 +192,53 @@ function buildFeaturesFromMacros(macroList, trainingDataArray, featurePrefix){
 		var rowEndIndex = macroList[j].indexOf(',');
 		var currentMacroColumn = parseInt(macroList[j].substring(columnStartIndex, columnEndIndex), 10);
 		var currentMacroRow = parseInt(macroList[j].substring(rowStartIndex, rowEndIndex), 10);
-		var uniqueColumnEntries = {};
+		var decodedMacroValue = '';
+
+		// check for boundry conditions for macro (i.e. for first word in training doc with template entry %x[-1,0])
+		if(index + currentMacroRow < 0){
+			decodedMacroValue = '_B'+(index + currentMacroRow); // will result in value of the form e.g. _B-1 (where _B-1 is the token before the start of a sample)
+		}
+		// check for boundry condition when currentMacroRow is looking past last word in document
+		else if(index + currentMacroRow >= dataMatrix.length){
+			decodedMacroValue = '_B+'+(index + currentMacroRow - dataMatrix.length + 1); // will result in value of the form e.g. _B+1 (where _B+1 is the token after the end of a sample)
+		}
+		//else the standard case
+		else{ 
+			var trainingEntryArray = dataMatrix[index+currentMacroRow].split(/\s/);
+			decodedMacroValue = trainingEntryArray[currentMacroColumn];
+		}
+
+		if(j === 0){
+			decodedMacroSequence = featurePrefix + decodedMacroValue;
+		}
+		else{
+			decodedMacroSequence += '/' + decodedMacroValue;
+		}
+	}
+	return decodedMacroSequence;
+}
+
+function buildFeaturesFromMacros(featureMacro, dataMatrix){
+	var unlabeledFeatures = [];
+	var macroList = featureMacro.match(/%x\[[-]?\d+,\d+\]/g);
+	var featurePrefix = featureMacro.substring(0,featureMacro.indexOf(':')+1);
+
+	for(var j=0; j<macroList.length;j++){
+		var columnStartIndex = macroList[j].indexOf(',')+1;
+		var columnEndIndex = macroList[j].indexOf(']');
+		var rowStartIndex = macroList[j].indexOf('[')+1;
+		var rowEndIndex = macroList[j].indexOf(',');
+		var currentMacroColumn = parseInt(macroList[j].substring(columnStartIndex, columnEndIndex), 10);
+		var currentMacroRow = parseInt(macroList[j].substring(rowStartIndex, rowEndIndex), 10);
 		var decodedMacroValue = '';
 		var relativePositionInSample;
 		var sampleNumber = 0;
 
-		// iterate through each line of the trainingDataArray (i.e. each entry in the training data set)
+		// iterate through each line of the dataMatrix (i.e. each entry in the training data set)
 		// and create a unique feature for that entry based on the current macro
-		for(var absolutePosition = 0; absolutePosition < trainingDataArray.length; absolutePosition++){
+		for(var absolutePosition = 0; absolutePosition < dataMatrix.length; absolutePosition++){
 
-			if(trainingDataArray[absolutePosition-1] === '' || absolutePosition === 0)
+			if(dataMatrix[absolutePosition-1] === '' || absolutePosition === 0)
 				relativePositionInSample = 0;
 			else
 				relativePositionInSample++;
@@ -118,28 +248,28 @@ function buildFeaturesFromMacros(macroList, trainingDataArray, featurePrefix){
 				decodedMacroValue = '_B'+(relativePositionInSample+currentMacroRow); // will result in value of the form e.g. _B-1 (where _B-1 is the token before the start of a sample)
 			}
 			// check for boundry condition when currentMacroRow is looking past last word in document
-			else if(currentMacroRow+absolutePosition >= trainingDataArray.length){
-				decodedMacroValue = '_B+'+(currentMacroRow+absolutePosition-trainingDataArray.length+1); // will result in value of the form e.g. _B+1 (where _B+1 is the token after the end of a sample)
+			else if(currentMacroRow+absolutePosition >= dataMatrix.length){
+				decodedMacroValue = '_B+'+(currentMacroRow+absolutePosition-dataMatrix.length+1); // will result in value of the form e.g. _B+1 (where _B+1 is the token after the end of a sample)
 			}
 			// check for boundry condition when currentMacroRow is looking past last word in sample
-			else if(macroOvershootOfSampleLength(trainingDataArray, absolutePosition, currentMacroRow) > 0){
-				var endOfSamplePosition = macroOvershootOfSampleLength(trainingDataArray, absolutePosition, currentMacroRow);
+			else if(macroOvershootOfSampleLength(dataMatrix, absolutePosition, currentMacroRow) > 0){
+				var endOfSamplePosition = macroOvershootOfSampleLength(dataMatrix, absolutePosition, currentMacroRow);
 				decodedMacroValue = '_B+'+(currentMacroRow+absolutePosition-endOfSamplePosition); // will result in value of the form e.g. _B+1 (where _B+1 is the token after the end of a sample)
 			}
 			// throw away conditions
-			else if(trainingDataArray[absolutePosition] === ''  	// an empty value shouldn't have any features
-					|| trainingDataArray[absolutePosition+currentMacroRow] === ''  	// features should not be created using the boundry spaces between samples
+			else if(dataMatrix[absolutePosition] === ''  	// an empty value shouldn't have any features
+					|| dataMatrix[absolutePosition+currentMacroRow] === ''  	// features should not be created using the boundry spaces between samples
 					|| (featurePrefix.match(/^B/) && currentMacroRow+relativePositionInSample < 0))  // bigram features shouldn't be created for words on the edge of the sample.
 			{ 
 				//keep track of sample number for labeling compound featueres
-				if(trainingDataArray[absolutePosition] === ''){
+				if(dataMatrix[absolutePosition] === ''){
 					sampleNumber++; 
 				}
 				continue;
 			}
 			//else the standard case
 			else{ 
-				var trainingEntryArray = trainingDataArray[absolutePosition+currentMacroRow].split(/\s/);
+				var trainingEntryArray = dataMatrix[absolutePosition+currentMacroRow].split(/\s/);
 				decodedMacroValue = trainingEntryArray[currentMacroColumn];
 			}
 
@@ -183,28 +313,28 @@ function labelFeatures(unlabeledFeatures, labelList){
 	return expandedFeaturesObject;
 }
 
-function buildTemplateArray(templateDataArray){
+function buildTemplateArray(templateDataArray, callback){
 	var templateArray = [];
 	var foundFeature = false;
 	for(var i = 0; i < templateDataArray.length; i++){
 		if(templateDataArray[i].match(/^U/) || templateDataArray[i].match(/^B/)){
 			foundFeature = true;
 			if(!templateDataArray[i].match(/%x\[[-]?[0-9]+,[-]?[0-9]+\]$/) && templateDataArray[i] !== 'B'){
-				throw new Error('Error with ' + templateDataArray[i]+ '. Please make sure each macro is of the form  %x[row,col].');
+				callback(new Error('Error with ' + templateDataArray[i]+ '. Please make sure each macro is of the form  %x[row,col].'));
 			}
 			templateArray.push(templateDataArray[i]);
 		}
 	}
 	if(!foundFeature)
-		throw new Error('No valid feature macros defined');
+		callback(new Error('No valid feature macros defined'));
 
-	return templateArray;
+	callback(null, templateArray);
 }
 
-function getLabelList(trainingDataArray){
+function getLabelList(dataMatrix){
 	var labelList = [];
-	for(var j = 0; j < trainingDataArray.length; j++){
-		var trainingEntryArray = trainingDataArray[j].split(/\s/);
+	for(var j = 0; j < dataMatrix.length; j++){
+		var trainingEntryArray = dataMatrix[j].split(/\s/);
 		var currentLabel = trainingEntryArray[trainingEntryArray.length-1];
 
 		if(labelList.indexOf(currentLabel) < 0 && currentLabel !== '')
@@ -213,20 +343,9 @@ function getLabelList(trainingDataArray){
 	return labelList;
 }
 
-function featureAlreadyInList(featureArray, featureObject){
-	for(var i = 0; i < featureArray.length; i++){
-		if( featureArray[i].feature === featureObject.feature 
-			&& featureArray[i].currentLabel === featureObject.currentLabel
-			&& featureArray[i].previousLabel === featureObject.previousLabel){
-			return true;
-		}
-	}
-	return false;
-}
-
-function macroOvershootOfSampleLength(trainingDataArray, absolutePosition, currentMacroRow){
+function macroOvershootOfSampleLength(dataMatrix, absolutePosition, currentMacroRow){
 	for(var i = absolutePosition; i <= absolutePosition+currentMacroRow; i++){
-		if(trainingDataArray[i] === ''){
+		if(dataMatrix[i] === ''){
 			return i-absolutePosition; 
 		}
 	}
@@ -244,45 +363,7 @@ function verifyTrainingAndTemplate(trainingFile, templateFile){
 		throw new Error('Invalid input.  The test file should have a .data extension');
 }
 
-// module.exports.setTrainingFile = function (trainingFile){
-// 	if(!trainingFile){
-// 		throw new Error('Must specify a training file');
-// 	}
-
-// 	if(trainingFile === null){
-// 		throw new Error('Training file can not be null');
-// 	}
-
-// 	trainingFile = trainingFile;
-
-// 	console.log('Training file set:')
-// 	console.log(trainingFile)
-// }
-
-// module.exports.setTemplate = setTemplateFile; 
-
-// function setTemplateFile(templateFile){
-// 	console.log('Training file set:')
-// 	console.log(trainingFile)
-// 	if(!templateFile){
-// 		throw new Error('Must specify a template file');
-// 	}
-
-// 	if(templateFile === null){
-// 		throw new Error('Template file can not be null');
-// 	}
-
-// 	templateFile = templateFile;
-
-// 	console.log('Template Set')
-
-// 	// open template file and fill up templateArray
-// 	// fs.readFile(templateFile, 'utf8', function (error, templateData) {
-// 	// 	if(error) {
-// 	// 		throw error;
-// 	// 	}
-
-// 	// 	var templateDataArray = templateData.split('\n'); 
-// 	// 	templateArray = buildTemplateArray(templateDataArray);
-// 	// });
-// }
+function printSummary(callback){
+	console.log('Number of Features Generated: ' + featureCount);
+	console.timeEnd('Generate Features');
+}
