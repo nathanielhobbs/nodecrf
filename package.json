@@ -3,9 +3,10 @@
   "version": "0.0.1",
   "description": "node implementaion of CRF (Conditional Random Field).",
   "scripts": {
-    "test": "./node_modules/nodeunit/bin/nodeunit tests/test*"
+    "test": "./node_modules/nodeunit/bin/nodeunit tests/test*.js"
   },
   "dependencies": {
+    "async": "*"
   },
   "devDependencies": {
     "nodeunit": "*"
