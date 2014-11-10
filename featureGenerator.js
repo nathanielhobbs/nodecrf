@@ -29,12 +29,11 @@ module.exports.generateFeatures = createFeatures;
 
 function createFeatures (trainingFile, templateFile, callback) {
 	verifyTrainingAndTemplate(trainingFile, templateFile);
-
 	console.time('Generate Features')
 
 	featureCount = 0;
 	//open training file
-	fs.readFile(trainingFile, 'utf8', function(error, trainingData) {
+	fs.readFile(trainingFile, {encoding: 'utf8'}, function(error, trainingData) {
 		if(error){
 			callback(error);
 		}
