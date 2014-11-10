@@ -31,14 +31,13 @@ module.exports.generateFeatures = createFeatures;
 
 function createFeatures (trainingFile, templateFile, callback) {
 	verifyTrainingAndTemplate(trainingFile, templateFile);
-
 	console.time('Generate Features')
 
 	featureCount = 0;
 	//open training file
-	fs.readFile(trainingFile, 'utf8', function(error, trainingData) {
+	fs.readFile(trainingFile, {encoding: 'utf8'}, function(error, trainingData) {
 		if(error){
-			callback(error);
+			return callback(error);
 		}
 
 		var data = trainingData.split('\n');
@@ -53,14 +52,14 @@ function createFeatures (trainingFile, templateFile, callback) {
 		// open template file
 		fs.readFile(templateFile, 'utf8', function (error, templateData) {
 			if(error) {
-				callback(error);
+				return callback(error);
 			}
 
 			// First look at template file to see which features we care about in the training file
 			var templateDataArray = templateData.split('\n'); 
-			buildTemplateArray(templateDataArray, function(error, templateArray){
-				if(error)
-					callback(error)
+			templateArray = buildTemplateArray(templateDataArray);
+			if (!templateArray)
+				return callback('No valid feature macros defined.');
 
 				// console.log('files read, calling distributedGenerateFeatures')
 
@@ -401,15 +400,17 @@ function buildTemplateArray(templateDataArray, callback){
 		if(templateDataArray[i].match(/^U/) || templateDataArray[i].match(/^B/)){
 			foundFeature = true;
 			if(!templateDataArray[i].match(/%x\[[-]?[0-9]+,[-]?[0-9]+\]$/) && templateDataArray[i] !== 'B'){
-				callback(new Error('Error with ' + templateDataArray[i]+ '. Please make sure each macro is of the form  %x[row,col].'));
+				// return callback('Error with ' + templateDataArray[i]+ '. Please make sure each macro is of the form  %x[row,col].');
+				return null;
 			}
 			templateArray.push(templateDataArray[i]);
 		}
 	}
 	if(!foundFeature)
-		callback(new Error('No valid feature macros defined'));
+		return null;
 
-	callback(null, templateArray);
+	// callback(null, templateArray);
+	return templateArray;
 }
 
 function getLabelList(dataMatrix){
