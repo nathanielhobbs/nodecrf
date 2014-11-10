@@ -35,7 +35,7 @@ function createFeatures (trainingFile, templateFile, callback) {
 	//open training file
 	fs.readFile(trainingFile, {encoding: 'utf8'}, function(error, trainingData) {
 		if(error){
-			callback(error);
+			return callback(error);
 		}
 
 		var dataMatrix = trainingData.split('\n');
@@ -46,16 +46,14 @@ function createFeatures (trainingFile, templateFile, callback) {
 		// open template file
 		fs.readFile(templateFile, 'utf8', function (error, templateData) {
 			if(error) {
-				callback(error);
+				return callback(error);
 			}
 
 			// First look at template file to see which features we care about in the training file
 			var templateDataArray = templateData.split('\n'); 
-			buildTemplateArray(templateDataArray, function(error, result){
-				if(error)
-					callback(error)
-				templateArray = result;
-			});
+			templateArray = buildTemplateArray(templateDataArray);
+			if (!templateArray)
+				return callback('No valid feature macros defined.');
 
 			// Look at training file and generate expanded features according to template macros
 			var expandedFeaturesObject = buildFeatures(templateArray, dataMatrix, labelList);
@@ -319,15 +317,17 @@ function buildTemplateArray(templateDataArray, callback){
 		if(templateDataArray[i].match(/^U/) || templateDataArray[i].match(/^B/)){
 			foundFeature = true;
 			if(!templateDataArray[i].match(/%x\[[-]?[0-9]+,[-]?[0-9]+\]$/) && templateDataArray[i] !== 'B'){
-				callback(new Error('Error with ' + templateDataArray[i]+ '. Please make sure each macro is of the form  %x[row,col].'));
+				// return callback('Error with ' + templateDataArray[i]+ '. Please make sure each macro is of the form  %x[row,col].');
+				return null;
 			}
 			templateArray.push(templateDataArray[i]);
 		}
 	}
 	if(!foundFeature)
-		callback(new Error('No valid feature macros defined'));
+		return null;
 
-	callback(null, templateArray);
+	// callback(null, templateArray);
+	return templateArray;
 }
 
 function getLabelList(dataMatrix){
