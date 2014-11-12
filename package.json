@@ -6,7 +6,8 @@
     "test": "./node_modules/nodeunit/bin/nodeunit tests/test*.js"
   },
   "dependencies": {
-    "async": "*"
+    "async": "*",
+    "sylvester": "*"
   },
   "devDependencies": {
     "nodeunit": "*"
