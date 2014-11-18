@@ -64,7 +64,7 @@ function createFeatures (trainingFile, templateFile, callback) {
 					callback(error)
 
 				distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, labelList, function(labeledFeatures){
-					console.log('labeled features: ', labeledFeatures)
+					// console.log('labeled features: ', labeledFeatures)
 
 					var featureIndicatorFunctions = buildFeatureIndicatorFunctions(labeledFeatures);
 
@@ -75,8 +75,6 @@ function createFeatures (trainingFile, templateFile, callback) {
 					// fs.writeFile('features.txt', JSON.stringify(labeledFeatures), 'utf8', printSummary(callback))
 				});
 			});
-
-			
 		});
 	});
 }
