@@ -39,7 +39,7 @@ function createFeatures (trainingFile, templateFile, callback) {
 	//open training file
 	fs.readFile(trainingFile, 'utf8', function(error, trainingData) {
 		if(error){
-			callback(error);
+			return callback(error);
 		}
 
 		var data = trainingData.split('\n');
@@ -54,23 +54,19 @@ function createFeatures (trainingFile, templateFile, callback) {
 		// open template file
 		fs.readFile(templateFile, 'utf8', function (error, templateData) {
 			if(error) {
-				callback(error);
+				return callback(error);
 			}
 
 			// First look at template file to see which features we care about in the training file
 			var templateDataArray = templateData.split('\n'); 
 			buildTemplateArray(templateDataArray, function(error, templateArray){
 				if(error)
-					callback(error)
+					return callback(error)
 
 				distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, labelList, function(labeledFeatures){
-					// console.log('labeled features: ', labeledFeatures)
-
-					var featureIndicatorFunctions = buildFeatureIndicatorFunctions(labeledFeatures);
-
 					printSummary();
-
-					callback(null,featureIndicatorFunctions);
+					console.log(labeledFeatures)
+					return callback(null,labeledFeatures);
 
 					// fs.writeFile('features.txt', JSON.stringify(labeledFeatures), 'utf8', printSummary(callback))
 				});
@@ -128,14 +124,14 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 					}
 
 					if(labelResponseCount === expandedFeaturesArray.length){
-						callback(labeledFeatures);
+						return callback(createFeaturesObject(labeledFeatures));
 					}
 				}
 
 				// find next macro to be decoded to be decoded and send a message to a worker to do the work.
 				if(!allFeaturesGenerated){
-					if(currentFeatureMacroIndex < templateArray.length){
-						if(nextDataMatrixIndex < dataMatrix.length){
+					if(nextDataMatrixIndex < dataMatrix.length){
+						if(currentFeatureMacroIndex < templateArray.length){
 							// create an object to send to the worker that includes all the information it needs to do its task
 							var featureInfo = {
 								macroIndex : currentFeatureMacroIndex
@@ -146,11 +142,11 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 							// send message to worker to decode the macro 
 							console.time('master send featureRequest to worker');
 							cluster.workers[id].send({featureRequest: featureInfo});
-							nextDataMatrixIndex++;
+							currentFeatureMacroIndex++;
 						}
 						else{ // once the current macro has been decoded for the entire dataMatrix, go on to the next macro
-							nextDataMatrixIndex = 0;
-							currentFeatureMacroIndex++;
+							nextDataMatrixIndex++;
+							currentFeatureMacroIndex = 0;
 						}
 					}
 					
@@ -211,83 +207,6 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 		});
 	}
 }
-
-function buildFeatureIndicatorFunctions(labeledFeaturesArray) {
-	var featuresWithIndicatorFunction = {};
-
-	featuresWithIndicatorFunction.decodeMacroChain = function (featureMacro, dataMatrix, index){
-		var macroList = featureMacro.match(/%x\[[-]?\d+,\d+\]/g);
-		var featurePrefix = featureMacro.substring(0,featureMacro.indexOf(':')+1);
-		var decodedMacroSequence = '';
-
-		// console.log('featureMacro:' + featureMacro)
-
-		for(var j=0; j<macroList.length;j++){
-			var columnStartIndex = macroList[j].indexOf(',')+1;
-			var columnEndIndex = macroList[j].indexOf(']');
-			var rowStartIndex = macroList[j].indexOf('[')+1;
-			var rowEndIndex = macroList[j].indexOf(',');
-			var currentMacroColumn = parseInt(macroList[j].substring(columnStartIndex, columnEndIndex), 10);
-			var currentMacroRow = parseInt(macroList[j].substring(rowStartIndex, rowEndIndex), 10);
-			var decodedMacroValue = '';
-
-			// check for boundry conditions for macro (i.e. for first word in training doc with template entry %x[-1,0])
-			if(index + currentMacroRow < 0){
-				decodedMacroValue = '_B'+(index + currentMacroRow); // will result in value of the form e.g. _B-1 (where _B-1 is the token before the start of a sample)
-			}
-			// check for boundry condition when currentMacroRow is looking past last word in document
-			else if(index + currentMacroRow >= dataMatrix.length){
-				decodedMacroValue = '_B+'+(index + currentMacroRow - dataMatrix.length + 1); // will result in value of the form e.g. _B+1 (where _B+1 is the token after the end of a sample)
-			}
-			//else the standard case
-			else{ 
-				// console.log(dataMatrix[index+currentMacroRow])
-				var trainingEntryArray = dataMatrix[index+currentMacroRow];
-				decodedMacroValue = trainingEntryArray[currentMacroColumn];
-			}
-
-			if(j === 0){
-				decodedMacroSequence = featurePrefix + decodedMacroValue;
-			}
-			else{
-				decodedMacroSequence += '/' + decodedMacroValue;
-			}
-		}
-		return decodedMacroSequence;
-	}
-
-	for(var i = 0; i < labeledFeaturesArray.length; i++){
-		// console.log('labeledFeaturesArray element: ' + JSON.stringify(labeledFeaturesArray[i]))
-		featuresWithIndicatorFunction[i] = {};
-
-		featuresWithIndicatorFunction[i].originalMacro = labeledFeaturesArray[i].originalMacro;
-		featuresWithIndicatorFunction[i].decodedMacro = labeledFeaturesArray[i].decodedMacro;
-		featuresWithIndicatorFunction[i].previousLabel = labeledFeaturesArray[i].previousLabel;
-		featuresWithIndicatorFunction[i].currentLabel = labeledFeaturesArray[i].currentLabel;
-
-		featuresWithIndicatorFunction[i].indicatorFunction = function (previousLabel, currentLabel, dataMatrix, index){
-			var decodedMacro = featuresWithIndicatorFunction.decodeMacroChain(this.originalMacro, dataMatrix, index);
-
-			// console.log('this feature: ' + this.previousLabel, this.currentLabel, this.decodedMacro, this.originalMacro);
-			// console.log('checking against: ' + previousLabel, currentLabel, decodedMacro)
-			if(this.previousLabel === 'n/a'){
-				if(currentLabel === this.currentLabel && decodedMacro === this.decodedMacro)
-					return 1;
-				else
-					return 0;
-			}
-			else if(previousLabel === this.previousLabel && 
-					currentLabel === this.currentLabel && 
-					decodedMacro === this.decodedMacro)
-				return 1;
-			else
-				return 0;
-		};
-	}
-
-	return featuresWithIndicatorFunction;
-}
-
 
 // takes macro chain and returns its decoded value at the given index.
 function decodeMacroChain(featureMacro, dataMatrix, index){
@@ -358,47 +277,24 @@ function labelIndividualFeature(originalMacro, decodedMacro, labelList){
 	var labeledFeaturesArray = [];
 	var expandedFeatureObject = {};
 
+	// label bigram features
 	if(decodedMacro.match(/^B/)){
 		for(var k=0; k < labelList.length; k++){
-			// create features for base cases (i.e. for 'start' 'stop' states when doing forward backward)
-			expandedFeatureObject = {
-					originalMacro : originalMacro
-					, decodedMacro : decodedMacro
-					, previousLabel : 'start'
-					, currentLabel : labelList[k]
-				};
-			labeledFeaturesArray.push(expandedFeatureObject);
-
-			expandedFeatureObject = {
-					originalMacro : originalMacro
-					, decodedMacro : decodedMacro
-					, previousLabel : labelList[k]
-					, currentLabel : 'stop'
-				};
-			labeledFeaturesArray.push(expandedFeatureObject)
-
-			// create features for normal case, when there is a unique label for each bigram
 			for(var l=0; l< labelList.length; l++){
-				expandedFeatureObject = {
-					originalMacro : originalMacro
-					, decodedMacro : decodedMacro
-					, previousLabel : labelList[l]
-					, currentLabel : labelList[k]
-				};
-				labeledFeaturesArray.push(expandedFeatureObject);
+				labeledFeaturesArray.push(originalMacro + '/' + 
+					decodedMacro + '/' + 
+					labelList[k] + '/' +
+					labelList[l]
+					);
 			}
 		}
-	}
+	} // label unigram features
 	else if(decodedMacro.match(/^U/)){
-		// console.log(labelList)
 		for(var k=0; k < labelList.length; k++){
-			expandedFeatureObject = {
-					originalMacro : originalMacro
-					, decodedMacro : decodedMacro
-					, previousLabel : 'n/a'
-					, currentLabel : labelList[k]
-				};
-				labeledFeaturesArray.push(expandedFeatureObject);
+				labeledFeaturesArray.push(originalMacro + '/' +
+					decodedMacro + '/' + 
+					labelList[k]
+					);
 		}
 	}
 	return labeledFeaturesArray;
@@ -417,9 +313,9 @@ function buildTemplateArray(templateDataArray, callback){
 		}
 	}
 	if(!foundFeature)
-		callback(new Error('No valid feature macros defined'));
+		return callback(new Error('No valid feature macros defined'));
 
-	callback(null, templateArray);
+	return callback(null, templateArray);
 }
 
 function getLabelList(dataMatrix){
@@ -454,7 +350,24 @@ function verifyTrainingAndTemplate(trainingFile, templateFile){
 		throw new Error('Invalid input.  The test file should have a .data extension');
 }
 
-function printSummary(callback){
+function printSummary(){
 	console.log('Number of Features Generated: ' + featureCount);
 	console.timeEnd('Generate Features');
+}
+
+function createFeaturesObject(labeledFeatures){
+	var featuresObject = {
+		unigramFeatures : {},
+		bigramFeatures : {}
+	}
+
+	for(var i = 0; i < labeledFeatures.length; i++){
+		if(labeledFeatures[i].match(/^B/)){
+			featuresObject.bigramFeatures[labeledFeatures[i]] = i;
+		} 
+		else if(labeledFeatures[i].match(/^U/)){
+			featuresObject.unigramFeatures[labeledFeatures[i]] = i;
+		}
+	}
+	return featuresObject	
 }
