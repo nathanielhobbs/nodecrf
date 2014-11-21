@@ -32,5 +32,6 @@ masterTrain.data
 productList.txt
 results.txt
 template
+log.txt
 
 samples/*
