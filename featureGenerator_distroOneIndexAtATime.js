@@ -65,7 +65,7 @@ function createFeatures (trainingFile, templateFile, callback) {
 
 				distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, labelList, function(labeledFeatures){
 					printSummary();
-					console.log(labeledFeatures)
+					// console.log(labeledFeatures)
 					return callback(null,labeledFeatures);
 
 					// fs.writeFile('features.txt', JSON.stringify(labeledFeatures), 'utf8', printSummary(callback))
@@ -84,9 +84,12 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 	var labelResponseCount = 0;
 
 	if (cluster.isMaster) {
-		// fork workers
+		var dataMatrixRanges = [];
+		// fork workers and set ranges for dataMatrix
 		for (var i = 0; i < numCPUs; i++){
 			cluster.fork();
+			dataMatrixRanges.push(Math.ceil(dataMatrix.length/numCPUs * (i+1)))
+			console.log(dataMatrixRanges[i])
 		}
 
 		// for macro decoding
@@ -102,11 +105,17 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 			cluster.workers[id].on('message', function(msg){
 				// handle the reception of a feature request result from worker
 				if(msg.featureResults){
-					if(msg.featureResults.decodedMacro !== '')
-						expandedFeatures[msg.featureResults.decodedMacro] = msg.featureResults.macroIndex;
+					var featureArray = msg.featureResults.decodedMacroArray;
+					for(var i = 0; i < featureArray.length; i++){
+						var decodedMacro = featureArray[i];
+						featureResponseCount++;
+						if(decodedMacro !== ''){
+							expandedFeatures[decodedMacro] = msg.featureResults.macroIndex;
+						}
+					}					
 
 					// we expect to receive the number of template macros * the length of the data matrix responses before being finished.
-					if(featureResponseCount++ === templateArray.length * dataMatrix.length -1 ){ 
+					if(featureResponseCount === templateArray.length * dataMatrix.length){ 
 						allFeaturesGenerated = true;
 						for(var feature in expandedFeatures){
 							// console.log('feature: ' + feature + ', expandedFeatures[feature]: ' + expandedFeatures[feature])
@@ -130,26 +139,30 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 
 				// find next macro to be decoded to be decoded and send a message to a worker to do the work.
 				if(!allFeaturesGenerated){
-					if(nextDataMatrixIndex < dataMatrix.length){
+					if(nextDataMatrixIndex < dataMatrixRanges.length){
 						if(currentFeatureMacroIndex < templateArray.length){
 							// create an object to send to the worker that includes all the information it needs to do its task
 							var featureInfo = {
 								macroIndex : currentFeatureMacroIndex
-								, sampleIndex : nextDataMatrixIndex
+								, sampleBeginIndex : dataMatrixRanges[nextDataMatrixIndex-1]
+								, sampleEndIndex : dataMatrixRanges[nextDataMatrixIndex]
 								// , originalMacro : templateArray[currentFeatureMacroIndex]
 							};
+							if(nextDataMatrixIndex === 0){
+								featureInfo.sampleBeginIndex = 0;
+							}
 
 							// send message to worker to decode the macro 
-							console.time('master send featureRequest to worker');
+							// console.log('sending to worker: ' + JSON.stringify(featureInfo))
 							cluster.workers[id].send({featureRequest: featureInfo});
 							currentFeatureMacroIndex++;
 						}
 						else{ // once the current macro has been decoded for the entire dataMatrix, go on to the next macro
 							nextDataMatrixIndex++;
 							currentFeatureMacroIndex = 0;
+							cluster.workers[id].send({keepAlive: 'keep message passing going'});
 						}
 					}
-					
 				}
 				// once all the macros have been decoded, add labelling to them
 				else if(allFeaturesGenerated && !allFeaturesLabeled){
@@ -188,10 +201,15 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 
 			if(msg.featureRequest){
 				var originalMacro = templateArray[msg.featureRequest.macroIndex];
-				var index = msg.featureRequest.sampleIndex;
-				var decodedMacro = decodeMacroChain(originalMacro, dataMatrix, index);
+				var decodedMacroArray = [];
+				var startIndex = msg.featureRequest.sampleBeginIndex;
+				var endIndex = msg.featureRequest.sampleEndIndex;
 
-				process.send({featureResults: {decodedMacro: decodedMacro, macroIndex: msg.featureRequest.macroIndex} })
+				for(var i = startIndex; i < endIndex; i++){
+					decodedMacroArray.push(decodeMacroChain(originalMacro, dataMatrix, i));
+				}
+				
+				process.send({featureResults: {decodedMacroArray: decodedMacroArray, macroIndex: msg.featureRequest.macroIndex} })
 			}
 
 			if(msg.labelRequest){
@@ -199,6 +217,10 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 				var originalMacro = templateArray[msg.labelRequest.macroIndex];
 
 				process.send({labelResults: labelIndividualFeature(originalMacro, decodedMacro, labelList)});
+			}
+
+			if(msg.keepAlive){
+				process.send({keepAlive: 'keeping message passing going'})
 			}
 
 			if(msg.hasOwnProperty('kill')){
@@ -244,7 +266,7 @@ function decodeMacroChain(featureMacro, dataMatrix, index){
 			decodedMacroValue = '_B+'+(currentMacroRow+index-endOfSamplePosition); // will result in value of the form e.g. _B+1 (where _B+1 is the token after the end of a sample)
 		}
 		else if (!dataMatrix[index+currentMacroRow]){
-			console.log('index: ' + index + ' currentMacroRow: ' + currentMacroRow);
+			return null;
 		}
 		// throw away conditions
 		else if(!dataMatrix[index]
