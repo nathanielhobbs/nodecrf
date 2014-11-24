@@ -89,7 +89,6 @@ function distributedGenerateFeatures(templateArray, dataMatrix, trainingFile, la
 		for (var i = 0; i < numCPUs; i++){
 			cluster.fork();
 			dataMatrixRanges.push(Math.ceil(dataMatrix.length/numCPUs * (i+1)))
-			console.log(dataMatrixRanges[i])
 		}
 
 		// for macro decoding
