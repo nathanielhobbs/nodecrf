@@ -8,24 +8,24 @@ var trainingFile, templateFile;
 var templateArray = []; // will be defined in setTemplateArray
 var featureCount = 0;
 
-if(process.argv[1] === 'node' && process.argv.length !== 4){
-	console.log("Invalid input.  Please specify a both a test file and template file name, e.g. node featureGenerator.js test.data template")
-	throw error;
-}
+// if(process.argv[1] === 'node' && process.argv.length !== 4){
+// 	console.log("Invalid input.  Please specify a both a test file and template file name, e.g. node featureGenerator.js test.data template")
+// 	throw error;
+// }
 
-else if(process.argv.length === 4 && !process.argv[2].match(/\.data/)){
-	console.log("Invalid input.  The test file should have a .data extension")
-	throw error;
-}
+// else if(process.argv.length === 4 && !process.argv[2].match(/\.data/)){
+// 	console.log("Invalid input.  The test file should have a .data extension")
+// 	throw error;
+// }
 
-if(process.argv.length === 4){
-	trainingFile = process.argv[2];
-	templateFile = process.argv[3];
+// if(process.argv.length === 4){
+// 	trainingFile = process.argv[2];
+// 	templateFile = process.argv[3];
 
-	createFeatures(trainingFile, templateFile, function(err, result){
-		if (err) throw err;
-	});
-}
+// 	createFeatures(trainingFile, templateFile, function(err, result){
+// 		if (err) throw err;
+// 	});
+// }
 
 module.exports.generateFeatures = createFeatures;
 
@@ -58,6 +58,7 @@ function createFeatures (trainingFile, templateFile, callback) {
 			// First look at template file to see which features we care about in the training file
 			var templateDataArray = templateData.split('\n'); 
 			templateArray = buildTemplateArray(templateDataArray);
+			
 			if (!templateArray)
 				return callback('No valid feature macros defined.');
 
